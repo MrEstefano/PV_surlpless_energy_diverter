@@ -339,7 +339,7 @@ int adc_clk_div = 640;
 hw_timer_t *My_timer = NULL;
 static esp_adc_cal_characteristics_t *adc_chars;
 //void 	adc_power_on(void);
-void IRAM_ATTR onTimer(void);
+//void IRAM_ATTR onTimer(void);
 //-------------------------------------------------------------------------------------------------------------------
 // An Interrupt Service Routine is now defined in which the ADC is instructed to 
 // measure each analogue input in sequence.  A "data ready" flag is set after each 
@@ -406,7 +406,7 @@ void setup()
   Serial.println();
 
   // Set up the ADC to be triggered by a hardware timer of fixed duration  
-	esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_10, 2, adc_chars);
+	esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_10, DEFAULT_VREF, adc_chars);
 	adc_set_clk_div(adc_clk_div);					//ADC clock divider, ADC clock is divided from APB clock (esp32 clk 80 MHz
 	adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_11);
 	adc1_config_channel_atten(ADC1_CHANNEL_3, ADC_ATTEN_DB_11);
