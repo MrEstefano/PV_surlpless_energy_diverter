@@ -196,7 +196,7 @@ void setup(){
 	Serial.println ( " uS fixed timer");
 
  	// Set up the ADC to be triggered by a hardware timer of fixed duration  
-	esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_10Bit, 0, &adc1_chars);
+	esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_10Bit, 2, &adc1_chars);
 	adc_set_clk_div(adc_clk_div);					//ADC clock divider, ADC clock is divided from APB clock (esp32 clk 80 MHz
 	adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_11db)
 	adc1_config_channel_atten(ADC1_CHANNEL_3, ADC_ATTEN_11db)
