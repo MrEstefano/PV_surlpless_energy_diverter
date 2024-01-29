@@ -82,6 +82,8 @@
 
 #include <Arduino.h> 
 #include <TimerOne.h>
+#include "driver/adc.h"
+#include "esp_adc_cal.h"
 
 #define ADC_TIMER_PERIOD 125 // uS (determines the sampling rate / amount of idle time)
 
@@ -120,9 +122,9 @@ const byte outputForTrigger = 4; // <-- this output port is active-low
 
 // allocation of analogue pins which are not dependent on the display type that is in use
 // **************************************************************************************
-const byte voltageSensor = 3;          // A3 is for the voltage sensor
-const byte currentSensor_diverted = 4; // A4 is for CT2 which measures diverted current
-const byte currentSensor_grid = 5;     // A5 is for CT1 which measures grid current
+//const byte voltageSensor = 36;          // A3 is for the voltage sensor
+//const byte currentSensor_diverted = 39; // A4 is for CT2 which measures diverted current
+//const byte currentSensor_grid = 34;     // A5 is for CT1 which measures grid current
 
 const byte delayBeforeSerialStarts = 1;  // in seconds, to allow Serial window to be opened
 const byte startUpPeriod = 3;  // in seconds, to allow LP filter to settle
@@ -340,6 +342,16 @@ void setup()
   Serial.println("-------------------------------------");
   Serial.println("Sketch ID:      Mk2_fasterControl_3.ino");
   Serial.println();
+
+  // Set up the ADC to be triggered by a hardware timer of fixed duration  
+	esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_10Bit, 2, &adc1_chars);
+	adc_set_clk_div(adc_clk_div);					//ADC clock divider, ADC clock is divided from APB clock (esp32 clk 80 MHz
+	adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_11db)
+	adc1_config_channel_atten(ADC1_CHANNEL_3, ADC_ATTEN_11db)
+	adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_11db)
+  ESP_ERROR_CHECK(adc1_config_width(ADC_WIDTH_10Bit));
+  ESP_ERROR_CHECK(adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_11));
+	adc_power_on();		          //Enable ADC power.
        
 #ifdef PIN_SAVING_HARDWARE
   // configure the IO drivers for the 4-digit display   
@@ -427,9 +439,9 @@ void setup()
   Serial.print (ADC_TIMER_PERIOD);
   Serial.println ( " uS fixed timer");
 
-  // Set up the ADC to be triggered by a hardware timer of fixed duration  
-  ADCSRA  = (1<<ADPS0)+(1<<ADPS1)+(1<<ADPS2);  // Set the ADC's clock to system clock / 128
-  ADCSRA |= (1 << ADEN);                 // Enable ADC
+  //Original code
+	//ADCSRA  = (1<<ADPS0)+(1<<ADPS1)+(1<<ADPS2);  		// Set the ADC's clock to system clock / 128
+	//ADCSRA |= (1 << ADEN);                 		// Enable ADC
 
   Timer1.initialize(ADC_TIMER_PERIOD);   // set Timer1 interval
   Timer1.attachInterrupt( timerIsr );    // declare timerIsr() as interrupt service routine
@@ -480,24 +492,27 @@ void timerIsr(void)
   switch(sample_index)
   {
     case 0:
-      sampleV = ADC;                    // store the ADC value (this one is for Voltage)
-      ADMUX = 0x40 + currentSensor_diverted;  // set up the next conversion, which is for Diverted Current
-      ADCSRA |= (1<<ADSC);              // start the ADC
+      sampleV = adc1_get_raw(ADC1_CHANNEL_0);                    // store the ADC value (this one is for Voltage)
+			adc_power_on();
+			//ADMUX = 0x40 + currentSensor_diverted;  // set up the next conversion, which is for Diverted Current
+			//ADCSRA |= (1<<ADSC);              // start the ADC      
       sample_index++;                   // increment the control flag
       sampleI_diverted = sampleI_diverted_raw;
       sampleI_grid = sampleI_grid_raw;
       dataReady = true;                 // all three ADC values can now be processed
       break;
     case 1:
-      sampleI_diverted_raw = ADC;               // store the ADC value (this one is for Diverted Current)
-      ADMUX = 0x40 + currentSensor_grid;  // set up the next conversion, which is for Grid Current
-      ADCSRA |= (1<<ADSC);              // start the ADC
+      sampleI_diverted_raw = adc1_get_raw(ADC1_CHANNEL_3);               // store the ADC value (this one is for Diverted Current)
+			adc_power_on();      
+			//ADMUX = 0x40 + currentSensor_grid;  // set up the next conversion, which is for Grid Current
+			//ADCSRA |= (1<<ADSC);              // start the ADC
       sample_index++;                   // increment the control flag
       break;
     case 2:
-      sampleI_grid_raw = ADC;               // store the ADC value (this one is for Grid Current)
-      ADMUX = 0x40 + voltageSensor;  // set up the next conversion, which is for Voltage
-      ADCSRA |= (1<<ADSC);              // start the ADC
+      sampleI_grid_raw = adc1_get_raw(ADC1_CHANNEL_6);               // store the ADC value (this one is for Grid Current)
+			adc_power_on();
+			//ADMUX = 0x40 + voltageSensor;  // set up the next conversion, which is for Voltage
+			//ADCSRA |= (1<<ADSC);              // start the ADC
       sample_index = 0;                 // reset the control flag
       break;
     default:
@@ -791,21 +806,21 @@ void allGeneralProcessing()
 
   // 
   // calculate the "real power" in this sample pair and add to the accumulated sum
-  long filtV_div4 = sampleVminusDC_long>>2;  // reduce to 16-bits (now x64, or 2^6)
-  long filtI_div4 = sampleIminusDC_grid>>2; // reduce to 16-bits (now x64, or 2^6)
-  long instP = filtV_div4 * filtI_div4;  // 32-bits (now x4096, or 2^12)
-  instP = instP>>12;     // scaling is now x1, as for Mk2 (V_ADC x I_ADC)       
-  sumP_grid +=instP; // cumulative power, scaling as for Mk2 (V_ADC x I_ADC)
+  long filtV_div4 = sampleVminusDC_long>>2;    // reduce to 16-bits (now x64, or 2^6)
+  long filtI_div4 = sampleIminusDC_grid>>2;    // reduce to 16-bits (now x64, or 2^6)
+  long instP = filtV_div4 * filtI_div4;        // 32-bits (now x4096, or 2^12)
+  instP = instP>>12;                           // scaling is now x1, as for Mk2 (V_ADC x I_ADC)       
+  sumP_grid +=instP;                           // cumulative power, scaling as for Mk2 (V_ADC x I_ADC)
   
   // Now deal with the diverted power (as measured via CT2)
   // remove most of the DC offset from the current sample (the precise value does not matter)
   long sampleIminusDC_diverted = ((long)(sampleI_diverted-DCoffset_I))<<8;
 
   // calculate the "real power" in this sample pair and add to the accumulated sum
-  filtI_div4 = sampleIminusDC_diverted>>2; // reduce to 16-bits (now x64, or 2^6)
-  instP = filtV_div4 * filtI_div4;  // 32-bits (now x4096, or 2^12)
-  instP = instP>>12;     // scaling is now x1, as for Mk2 (V_ADC x I_ADC)       
-  sumP_diverted +=instP; // cumulative power, scaling as for Mk2 (V_ADC x I_ADC)
+  filtI_div4 = sampleIminusDC_diverted>>2;       // reduce to 6-bits (now x64, or 2^6)
+  instP = filtV_div4 * filtI_div4;                // 32-bits (now x4096, or 2^12)
+  instP = instP>>12;                             // scaling is now x1, as for Mk2 (V_ADC x I_ADC)       
+  sumP_diverted +=instP;                       // cumulative power, scaling as for Mk2 (V_ADC x I_ADC)
   
   sampleSetsDuringThisMainsCycle++;
   
