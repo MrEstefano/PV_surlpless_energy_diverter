@@ -79,9 +79,17 @@
  *      Robin Emley
  *      www.Mk2PVrouter.co.uk
  */
+#include <Arduino.h>
 
-#include <Arduino.h> 
-#include <TimerOne.h>
+#include <WiFi.h>
+#include <time.h>
+#include <Firebase_ESP_Client.h>
+
+//Provide the token generation process info.
+#include "addons/TokenHelper.h"
+//Provide the RTDB payload printing info and other helper functions.
+#include "addons/RTDBHelper.h"
+
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
 
@@ -154,6 +162,7 @@ volatile boolean dataReady = false;
 volatile int sampleI_grid;
 volatile int sampleI_diverted;
 volatile int sampleV;
+
 
 // For an enhanced polarity detection mechanism, which includes a persistence check
 #define PERSISTENCE_FOR_POLARITY_CHANGE 1 // sample sets
@@ -325,7 +334,60 @@ byte charsForDisplay[noOfDigitLocations] = {20,20,20,20}; // all blank
 
 boolean EDD_isActive = false; // energy divertion detection
 long requiredExportPerMainsCycle_inIEU;
+//-------------------------------------------------------------------------------------------------------------------
+int adc_clk_div = 640;
+hw_timer_t *My_timer = NULL;
+static esp_adc_cal_characteristics_t *adc_chars;
+//void 	adc_power_on(void);
+void IRAM_ATTR onTimer(void);
+//-------------------------------------------------------------------------------------------------------------------
+// An Interrupt Service Routine is now defined in which the ADC is instructed to 
+// measure each analogue input in sequence.  A "data ready" flag is set after each 
+// voltage conversion has been completed.  
+//   For each set of samples, the two samples for current  are taken before the one 
+// for voltage.  This is appropriate because each waveform current is generally slightly 
+// advanced relative to the waveform for voltage.  The data ready flag is cleared 
+// within loop().
+//   This Interrupt Service Routine is for use when the ADC is fixed timer mode.  It is 
+// executed whenever the ADC timer expires.  In this mode, the next ADC conversion is 
+// initiated from within this ISR.  
+//
+void IRAM_ATTR onTimer(){                                         
+  static unsigned char sample_index = 0;
+  static int  sampleI_grid_raw;
+  static int sampleI_diverted_raw;
 
+
+  switch(sample_index)
+  {
+    case 0:
+      sampleV = adc1_get_raw(ADC1_CHANNEL_0);                    // store the ADC value (this one is for Voltage)
+			//adc_power_on();
+			//ADMUX = 0x40 + currentSensor_diverted;  // set up the next conversion, which is for Diverted Current
+			//ADCSRA |= (1<<ADSC);              // start the ADC      
+      sample_index++;                   // increment the control flag
+      sampleI_diverted = sampleI_diverted_raw;
+      sampleI_grid = sampleI_grid_raw;
+      dataReady = true;                 // all three ADC values can now be processed
+      break;
+    case 1:
+      sampleI_diverted_raw = adc1_get_raw(ADC1_CHANNEL_3);               // store the ADC value (this one is for Diverted Current)
+			//adc_power_on();      
+			//ADMUX = 0x40 + currentSensor_grid;  // set up the next conversion, which is for Grid Current
+			//ADCSRA |= (1<<ADSC);              // start the ADC
+      sample_index++;                   // increment the control flag
+      break;
+    case 2:
+      sampleI_grid_raw = adc1_get_raw(ADC1_CHANNEL_6);               // store the ADC value (this one is for Grid Current)
+			//adc_power_on();
+			//ADMUX = 0x40 + voltageSensor;  // set up the next conversion, which is for Voltage
+			//ADCSRA |= (1<<ADSC);              // start the ADC
+      sample_index = 0;                 // reset the control flag
+      break;
+    default:
+      sample_index = 0;                 // to prevent lockup (should never get here)      
+  }
+}
 
 void setup()
 {  
@@ -337,21 +399,21 @@ void setup()
 
   delay(delayBeforeSerialStarts * 1000); // allow time to open Serial monitor      
  
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println();
   Serial.println("-------------------------------------");
   Serial.println("Sketch ID:      Mk2_fasterControl_3.ino");
   Serial.println();
 
   // Set up the ADC to be triggered by a hardware timer of fixed duration  
-	esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_10Bit, 2, &adc1_chars);
+	esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_10, 2, adc_chars);
 	adc_set_clk_div(adc_clk_div);					//ADC clock divider, ADC clock is divided from APB clock (esp32 clk 80 MHz
-	adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_11db)
-	adc1_config_channel_atten(ADC1_CHANNEL_3, ADC_ATTEN_11db)
-	adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_11db)
-  ESP_ERROR_CHECK(adc1_config_width(ADC_WIDTH_10Bit));
+	adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_11);
+	adc1_config_channel_atten(ADC1_CHANNEL_3, ADC_ATTEN_DB_11);
+	adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
+  ESP_ERROR_CHECK(adc1_config_width(ADC_WIDTH_BIT_10));
   ESP_ERROR_CHECK(adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_11));
-	adc_power_on();		          //Enable ADC power.
+	//adc_power_on();		          //Enable ADC power.
        
 #ifdef PIN_SAVING_HARDWARE
   // configure the IO drivers for the 4-digit display   
@@ -443,9 +505,15 @@ void setup()
 	//ADCSRA  = (1<<ADPS0)+(1<<ADPS1)+(1<<ADPS2);  		// Set the ADC's clock to system clock / 128
 	//ADCSRA |= (1 << ADEN);                 		// Enable ADC
 
-  Timer1.initialize(ADC_TIMER_PERIOD);   // set Timer1 interval
-  Timer1.attachInterrupt( timerIsr );    // declare timerIsr() as interrupt service routine
+  //Timer1.initialize(ADC_TIMER_PERIOD);   // set Timer1 interval
+  //Timer1.attachInterrupt( timerIsr );    // declare timerIsr() as interrupt service routine
 
+  //setting the interrupt
+  My_timer = timerBegin(8000000); //80 -frequency
+  timerAttachInterrupt(My_timer, &onTimer);
+  timerAlarm(My_timer, ADC_TIMER_PERIOD, true, 0);
+  //timerWrite(My_timer, 1000000);
+  timerStart(My_timer); //Just Enable
     
   Serial.print ( "powerCal_grid =      "); Serial.println (powerCal_grid,4);
   Serial.print ( "powerCal_diverted = "); Serial.println (powerCal_diverted,4);
@@ -466,59 +534,12 @@ void setup()
   Serial.println(singleEnergyThreshold_long);
   
   Serial.print(">>free RAM = ");
-  Serial.println(freeRam());  // a useful value to keep an eye on
+  //Serial.println(freeRam());  // a useful value to keep an eye on
 
   Serial.println ("----");    
 }
 
-// An Interrupt Service Routine is now defined in which the ADC is instructed to 
-// measure each analogue input in sequence.  A "data ready" flag is set after each 
-// voltage conversion has been completed.  
-//   For each set of samples, the two samples for current  are taken before the one 
-// for voltage.  This is appropriate because each waveform current is generally slightly 
-// advanced relative to the waveform for voltage.  The data ready flag is cleared 
-// within loop().
-//   This Interrupt Service Routine is for use when the ADC is fixed timer mode.  It is 
-// executed whenever the ADC timer expires.  In this mode, the next ADC conversion is 
-// initiated from within this ISR.  
-//
-void timerIsr(void)
-{                                         
-  static unsigned char sample_index = 0;
-  static int  sampleI_grid_raw;
-  static int sampleI_diverted_raw;
 
-
-  switch(sample_index)
-  {
-    case 0:
-      sampleV = adc1_get_raw(ADC1_CHANNEL_0);                    // store the ADC value (this one is for Voltage)
-			adc_power_on();
-			//ADMUX = 0x40 + currentSensor_diverted;  // set up the next conversion, which is for Diverted Current
-			//ADCSRA |= (1<<ADSC);              // start the ADC      
-      sample_index++;                   // increment the control flag
-      sampleI_diverted = sampleI_diverted_raw;
-      sampleI_grid = sampleI_grid_raw;
-      dataReady = true;                 // all three ADC values can now be processed
-      break;
-    case 1:
-      sampleI_diverted_raw = adc1_get_raw(ADC1_CHANNEL_3);               // store the ADC value (this one is for Diverted Current)
-			adc_power_on();      
-			//ADMUX = 0x40 + currentSensor_grid;  // set up the next conversion, which is for Grid Current
-			//ADCSRA |= (1<<ADSC);              // start the ADC
-      sample_index++;                   // increment the control flag
-      break;
-    case 2:
-      sampleI_grid_raw = adc1_get_raw(ADC1_CHANNEL_6);               // store the ADC value (this one is for Grid Current)
-			adc_power_on();
-			//ADMUX = 0x40 + voltageSensor;  // set up the next conversion, which is for Voltage
-			//ADCSRA |= (1<<ADSC);              // start the ADC
-      sample_index = 0;                 // reset the control flag
-      break;
-    default:
-      sample_index = 0;                 // to prevent lockup (should never get here)      
-  }
-}
 
 
 // When using interrupt-based logic, the main processor waits in loop() until the 
@@ -1018,6 +1039,3 @@ void refreshDisplay()
   int v; 
   return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval); 
 }*/
-
-
-
