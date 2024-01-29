@@ -309,126 +309,117 @@ void allGeneralProcessing()
     polarityOfMostRecentVsample = NEGATIVE; }
   confirmPolarity();
   
-  if (polarityConfirmed == POSITIVE) 
-  { 
-    if (polarityConfirmedOfLastSampleV != POSITIVE)
-    {
-      // This is the start of a new +ve half cycle (just after the zero-crossing point)
-      cycleCount++;
-      if (beyondStartUpPhase)
-      {     
-        // a simple routine for checking the performance of this new ISR structure     
-        if (sampleSetsDuringThisMainsCycle < lowestNoOfSampleSetsPerMainsCycle) {
-          lowestNoOfSampleSetsPerMainsCycle = sampleSetsDuringThisMainsCycle; }
-             
-        // Calculate the real power and energy during the last whole mains cycle.
-        //
-        // sumP contains the sum of many individual calculations of instantaneous power.  In  
-        // order to obtain the average power during the relevant period, sumP must first be 
-        // divided by the number of samples that have contributed to its value.
-        //
-        // The next stage would normally be to apply a calibration factor so that real power 
-        // can be expressed in Watts.  That's fine for floating point maths, but it's not such
-        // a good idea when integer maths is being used.  To keep the numbers large, and also 
-        // to save time, calibration of power is omitted at this stage.  Real Power (stored as 
-        // a 'long') is therefore (1/powerCal) times larger than the actual power in Watts.
-        //
-        long realPower_grid = sumP_grid / sampleSetsDuringThisMainsCycle; // proportional to Watts
-    
-        // Next, the energy content of this power rating needs to be determined.  Energy is 
-        // power multiplied by time, so the next step is normally to multiply the measured
-        // value of power by the time over which it was measured.
-        //   Instanstaneous power is calculated once every mains cycle. When integer maths is 
-        // being used, a repetitive power-to-energy conversion seems an unnecessary workload.  
-        // As all sampling periods are of similar duration, it is more efficient simply to 
-        // add all of the power samples together, and note that their sum is actually 
-        // CYCLES_PER_SECOND greater than it would otherwise be.
-        //   Although the numerical value itself does not change, I thought that a new name 
-        // may be helpful so as to minimise confusion.  
-        //   The 'energy' variable below is CYCLES_PER_SECOND * (1/powerCal) times larger than 
-        // the actual energy in Joules.
-        //
-        long realEnergy_grid = realPower_grid;      
-   
-        // Energy contributions from the grid connection point (CT1) are summed in an 
-        // accumulator which is known as the energy bucket.  The purpose of the energy bucket 
-        // is to mimic the operation of the supply meter. Most meters generate a visible pulse
-        // when a certain amount of forward energy flow has been recorded, often 3600 Joules.
-        // For this calibration sketch, the capacity of the energy bucket is set to this same 
-        // value within setup().
-        //    
-        // The latest contribution can now be added to this energy bucket
-        energyInBucket_long += realEnergy_grid;  
+  if (polarityConfirmed == POSITIVE) { 
+	    if (polarityConfirmedOfLastSampleV != POSITIVE){
+		      // This is the start of a new +ve half cycle (just after the zero-crossing point)
+		      cycleCount++;
+		      if (beyondStartUpPhase){     
+			        // a simple routine for checking the performance of this new ISR structure     
+			        if (sampleSetsDuringThisMainsCycle < lowestNoOfSampleSetsPerMainsCycle) {
+			          	lowestNoOfSampleSetsPerMainsCycle = sampleSetsDuringThisMainsCycle; }
+			             
+			        // Calculate the real power and energy during the last whole mains cycle.
+			        //
+			        // sumP contains the sum of many individual calculations of instantaneous power.  In  
+			        // order to obtain the average power during the relevant period, sumP must first be 
+			        // divided by the number of samples that have contributed to its value.
+			        //
+			        // The next stage would normally be to apply a calibration factor so that real power 
+			        // can be expressed in Watts.  That's fine for floating point maths, but it's not such
+			        // a good idea when integer maths is being used.  To keep the numbers large, and also 
+			        // to save time, calibration of power is omitted at this stage.  Real Power (stored as 
+			        // a 'long') is therefore (1/powerCal) times larger than the actual power in Watts.
+			        //
+			        long realPower_grid = sumP_grid / sampleSetsDuringThisMainsCycle; // proportional to Watts
+			    
+			        // Next, the energy content of this power rating needs to be determined.  Energy is 
+			        // power multiplied by time, so the next step is normally to multiply the measured
+			        // value of power by the time over which it was measured.
+			        //   Instanstaneous power is calculated once every mains cycle. When integer maths is 
+			        // being used, a repetitive power-to-energy conversion seems an unnecessary workload.  
+			        // As all sampling periods are of similar duration, it is more efficient simply to 
+			        // add all of the power samples together, and note that their sum is actually 
+			        // CYCLES_PER_SECOND greater than it would otherwise be.
+			        //   Although the numerical value itself does not change, I thought that a new name 
+			        // may be helpful so as to minimise confusion.  
+			        //   The 'energy' variable below is CYCLES_PER_SECOND * (1/powerCal) times larger than 
+			        // the actual energy in Joules.
+			        //
+			        long realEnergy_grid = realPower_grid;      
+			   
+			        // Energy contributions from the grid connection point (CT1) are summed in an 
+			        // accumulator which is known as the energy bucket.  The purpose of the energy bucket 
+			        // is to mimic the operation of the supply meter. Most meters generate a visible pulse
+			        // when a certain amount of forward energy flow has been recorded, often 3600 Joules.
+			        // For this calibration sketch, the capacity of the energy bucket is set to this same 
+			        // value within setup().
+			        //    
+			        // The latest contribution can now be added to this energy bucket
+			        energyInBucket_long += realEnergy_grid;  
+			
+			        // when operating as a cal program
+			        if (energyInBucket_long > capacityOfEnergyBucket_long){
+				          energyInBucket_long -= capacityOfEnergyBucket_long;
+				          registerConsumedPower();   
+			        }
+			        
+			        if (energyInBucket_long < 0){
+				          digitalWrite(outputForLED, LED_ON); // to mimic the nehaviour of an electricity meter
+				          energyInBucket_long = 0; 
+			        }  
+			         
+			        // continuity checker
+			        sampleCount_forContinuityChecker++;
+			        if (sampleCount_forContinuityChecker >= CONTINUITY_CHECK_MAXCOUNT){
+				          sampleCount_forContinuityChecker = 0;
+				          Serial.println(lowestNoOfSampleSetsPerMainsCycle);
+				          lowestNoOfSampleSetsPerMainsCycle = 999;
+			        }  
+			
+			        // clear the per-cycle accumulators for use in this new mains cycle.  
+			        sampleSetsDuringThisMainsCycle = 0;
+			        sumP_grid = 0;
+			        check_LED_status();
 
-        // when operating as a cal program
-        if (energyInBucket_long > capacityOfEnergyBucket_long)
-        {
-          energyInBucket_long -= capacityOfEnergyBucket_long;
-          registerConsumedPower();   
-        }
-        
-        if (energyInBucket_long < 0)
-        {
-          digitalWrite(outputForLED, LED_ON); // to mimic the nehaviour of an electricity meter
-          energyInBucket_long = 0; 
-        }  
-         
-        // continuity checker
-        sampleCount_forContinuityChecker++;
-        if (sampleCount_forContinuityChecker >= CONTINUITY_CHECK_MAXCOUNT)
-        {
-          sampleCount_forContinuityChecker = 0;
-          Serial.println(lowestNoOfSampleSetsPerMainsCycle);
-          lowestNoOfSampleSetsPerMainsCycle = 999;
-        }  
-
-        // clear the per-cycle accumulators for use in this new mains cycle.  
-        sampleSetsDuringThisMainsCycle = 0;
-        sumP_grid = 0;
-        check_LED_status();
-
-      }
-      else
-      {  
-        // wait until the DC-blocking filters have had time to settle
-        if(millis() > (delayBeforeSerialStarts + startUpPeriod) * 1000) 
-        {
-          beyondStartUpPhase = true;
-          sumP_grid = 0;
-          sampleSetsDuringThisMainsCycle = 0; // not yet dealt with for this cycle
-          sampleCount_forContinuityChecker = 1; // opportunity has been missed for this cycle
-          lowestNoOfSampleSetsPerMainsCycle = 999;
-          Serial.println ("Go!");
-        }
-      }
-    } // end of processing that is specific to the first Vsample in each +ve half cycle      
+      		}
+     		else{  
+	        // wait until the DC-blocking filters have had time to settle
+		        if(millis() > (delayBeforeSerialStarts + startUpPeriod) * 1000) {
+			          beyondStartUpPhase = true;
+			          sumP_grid = 0;
+			          sampleSetsDuringThisMainsCycle = 0; // not yet dealt with for this cycle
+			          sampleCount_forContinuityChecker = 1; // opportunity has been missed for this cycle
+			          lowestNoOfSampleSetsPerMainsCycle = 999;
+			          Serial.println ("Go!");
+	        	}
+      		}
+    	} // end of processing that is specific to the first Vsample in each +ve half cycle      
   } // end of processing that is specific to samples where the voltage is positive
   
-  else // the polatity of this sample is negative
-  {     
-    if (polarityConfirmedOfLastSampleV != NEGATIVE)
-    {
-      // This is the start of a new -ve half cycle (just after the zero-crossing point)      
-      // which is a convenient point to update the Low Pass Filter for DC-offset removal
-      //  The portion which is fed back into the integrator is approximately one percent
-      // of the average offset of all the Vsamples in the previous mains cycle.
-      //
-      long previousOffset = DCoffset_V_long;
-      DCoffset_V_long = previousOffset + (cumVdeltasThisCycle_long>>12); 
-      cumVdeltasThisCycle_long = 0;
-      
-      // To ensure that the LPF will always start up correctly when 240V AC is available, its
-      // output value needs to be prevented from drifting beyond the likely range of the 
-      // voltage signal.  This avoids the need to use a HPF as was done for initial Mk2 builds.
-      //
-      if (DCoffset_V_long < DCoffset_V_min) {
-        DCoffset_V_long = DCoffset_V_min; }
-      else  
-      if (DCoffset_V_long > DCoffset_V_max) {
-        DCoffset_V_long = DCoffset_V_max; }
-           
-    } // end of processing that is specific to the first Vsample in each -ve half cycle
-  } // end of processing that is specific to samples where the voltage is negative
+	else {        										// the polatity of this sample is negative
+		if (polarityConfirmedOfLastSampleV != NEGATIVE){
+		      // This is the start of a new -ve half cycle (just after the zero-crossing point)      
+		      // which is a convenient point to update the Low Pass Filter for DC-offset removal
+		      //  The portion which is fed back into the integrator is approximately one percent
+		      // of the average offset of all the Vsamples in the previous mains cycle.
+		      //
+		      long previousOffset = DCoffset_V_long;
+		      DCoffset_V_long = previousOffset + (cumVdeltasThisCycle_long>>12); 
+		      cumVdeltasThisCycle_long = 0;
+		      
+		      // To ensure that the LPF will always start up correctly when 240V AC is available, its
+		      // output value needs to be prevented from drifting beyond the likely range of the 
+		      // voltage signal.  This avoids the need to use a HPF as was done for initial Mk2 builds.
+		      //
+	        if (DCoffset_V_long < DCoffset_V_min) {
+			DCoffset_V_long = DCoffset_V_min;
+                }
+	        else if (DCoffset_V_long > DCoffset_V_max) {
+			DCoffset_V_long = DCoffset_V_max; 
+	        }
+		           
+		} // end of processing that is specific to the first Vsample in each -ve half cycle
+	} // end of processing that is specific to samples where the voltage is negative
   
   // processing for EVERY set of samples
   //
@@ -437,24 +428,26 @@ void allGeneralProcessing()
   long sampleIminusDC_grid = ((long)(sampleI_grid-DCoffset_I))<<8;
    
   // phase-shift the voltage waveform so that it aligns with the grid current waveform
-  long  phaseShiftedSampleVminusDC_grid = lastSampleVminusDC_long
-         + (((sampleVminusDC_long - lastSampleVminusDC_long)*phaseCal_grid_int)>>8);  
-//  long  phaseShiftedSampleVminusDC_grid = sampleVminusDC_long; // <- simple version for when
+	
+  long  phaseShiftedSampleVminusDC_grid = lastSampleVminusDC_long + (((sampleVminusDC_long - lastSampleVminusDC_long)*phaseCal_grid_int)>>8);  
+	
+  //long  phaseShiftedSampleVminusDC_grid = sampleVminusDC_long; // <- simple version for when
                                                                // phaseCal is not in use
                                                                
   // calculate the "real power" in this sample pair and add to the accumulated sum
+	
   long filtV_div4 = phaseShiftedSampleVminusDC_grid>>2;  // reduce to 16-bits (now x64, or 2^6)
-  long filtI_div4 = sampleIminusDC_grid>>2; // reduce to 16-bits (now x64, or 2^6)
-  long instP = filtV_div4 * filtI_div4;  // 32-bits (now x4096, or 2^12)
-  instP = instP>>12;     // scaling is now x1, as for Mk2 (V_ADC x I_ADC)       
-  sumP_grid +=instP; // cumulative power, scaling as for Mk2 (V_ADC x I_ADC) 
+  long filtI_div4 = sampleIminusDC_grid>>2; 		// reduce to 16-bits (now x64, or 2^6)
+  long instP = filtV_div4 * filtI_div4;  		// 32-bits (now x4096, or 2^12)
+  instP = instP>>12;     				// scaling is now x1, as for Mk2 (V_ADC x I_ADC)       
+  sumP_grid +=instP; 					// cumulative power, scaling as for Mk2 (V_ADC x I_ADC) 
   
   sampleSetsDuringThisMainsCycle++;
   
   // store items for use during next loop
-  cumVdeltasThisCycle_long += sampleVminusDC_long; // for use with LP filter
-  lastSampleVminusDC_long = sampleVminusDC_long;  // required for phaseCal algorithm
-  polarityConfirmedOfLastSampleV = polarityConfirmed;  // for identification of half cycle boundaries
+  cumVdeltasThisCycle_long += sampleVminusDC_long; 		// for use with LP filter
+  lastSampleVminusDC_long = sampleVminusDC_long;  		// required for phaseCal algorithm
+  polarityConfirmedOfLastSampleV = polarityConfirmed;  		// for identification of half cycle boundaries
 }
 //  ----- end of main Mk2i code -----
 
