@@ -152,125 +152,121 @@ static esp_adc_cal_characteristics_t adc1_chars;
 volatile int adc_clk_div = 640;
 void adc_power_on(void);
 
-void setup()
-{  
-  pinMode(outputForLED, OUTPUT);  
-  delay (100);
-  LED_state = LED_ON;                     // to mimic the behaviour of an electricity 
-  digitalWrite(outputForLED, LED_state);  // meter which starts up in 'sleep' mode
-  
-  delay(delayBeforeSerialStarts * 1000); // allow time to open Serial monitor      
- 
-  Serial.begin(9600);
-  Serial.println();
-  Serial.println("-------------------------------------");
-  Serial.println("Sketch ID:      cal_CT1_v_meter.ino");
-  Serial.println();
-
-  
-    esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_10Bit, 0, &adc1_chars);
-	adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_11db)
-adc1_config_channel_atten(ADC1_CHANNEL_3, ADC_ATTEN_11db)
-adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_11db)
-    ESP_ERROR_CHECK(adc1_config_width(ADC_WIDTH_10Bit));
-    ESP_ERROR_CHECK(adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_11));
-              
-  // When using integer maths, the SIZE of the ENERGY BUCKET is altered to match the
-  // scaling of the energy detection mechanism that is in use.  This avoids the need 
-  // to re-scale every energy contribution, thus saving processing time.  This process 
-  // is described in more detail in the function, allGeneralProcessing(), just before 
-  // the energy bucket is updated at the start of each new cycle of the mains.
-  //
-  // For the flow of energy at the 'grid' connection point (CT1) 
-  capacityOfEnergyBucket_long = 
-     (long)ENERGY_BUCKET_CAPACITY_IN_JOULES * CYCLES_PER_SECOND * (1/powerCal_grid);
-  energyInBucket_long = 0;
-  
-  // When using integer maths, calibration values that have supplied in floating point 
-  // form need to be rescaled.  
-  //
-  phaseCal_grid_int = phaseCal_grid * 256; // for integer maths
-  phaseCal_diverted_int = phaseCal_diverted * 256; // for integer maths
-  
-  // Define operating limits for the LP filter which identifies DC offset in the voltage 
-  // sample stream.  By limiting the output range, the filter always should start up 
-  // correctly.
-  DCoffset_V_long = 512L * 256; // nominal mid-point value of ADC @ x256 scale  
-  DCoffset_V_min = (long)(512L - 100) * 256; // mid-point of ADC minus a working margin
-  DCoffset_V_max = (long)(512L + 100) * 256; // mid-point of ADC plus a working margin
-
-  Serial.print ("ADC mode:       ");
-  Serial.print (ADC_TIMER_PERIOD);
-  Serial.println ( " uS fixed timer");
-
-  // Set up the ADC to be triggered by a hardware timer of fixed duration  
-	adc_set_clk_div(adc_clk_div);	//ADC clock divider, ADC clock is divided from APB clock (esp32 clk 80 MHz
-	adc_power_on();		          //Enable ADC power.
-  //ADCSRA  = (1<<ADPS0)+(1<<ADPS1)+(1<<ADPS2);  // Set the ADC's clock to system clock / 128
-  //ADCSRA |= (1 << ADEN);                 // Enable ADC
-
-  Timer1.initialize(ADC_TIMER_PERIOD);   // set Timer1 interval
-  Timer1.attachInterrupt( timerIsr );    // declare timerIsr() as interrupt service routine
-
-  Serial.print ( "powerCal_grid =      "); Serial.println (powerCal_grid,4);
-  Serial.print ( "powerCal_diverted = "); Serial.println (powerCal_diverted,4);
-  
-  Serial.print ("zero-crossing persistence (sample sets) = ");
-  Serial.println (PERSISTENCE_FOR_POLARITY_CHANGE);
-  Serial.print ("continuity sampling display rate (mains cycles) = ");
-  Serial.println (CONTINUITY_CHECK_MAXCOUNT);  
-  
-  Serial.println ("----");    
-
-}
-// An Interrupt Service Routine is now defined in which the ADC is instructed to 
-// measure each analogue input in sequence.  A "data ready"flag is set after each 
-// voltage conversion has been completed.  
-//   For each set of samples, the two samples for current  are taken before the one 
-// for voltage.  This is appropriate because each waveform current is generally slightly 
-// advanced relative to the waveform for voltage.  The data ready flag is cleared 
-// within loop().
-//   This Interrupt Service Routine is for use when the ADC is fixed timer mode.  It is 
-// executed whenever the ADC timer expires.  In this mode, the next ADC conversion is 
-// initiated from within this ISR.  
-//
-void timerIsr(void)
-{                                         
-  static unsigned char sample_index = 0;
-  static int  sampleI_grid_raw;
-  static int sampleI_diverted_raw;
-
-
-  switch(sample_index)
-  {
-    case 0:
+void setup(){  
+	pinMode(outputForLED, OUTPUT);  
+	delay (100);
+	LED_state = LED_ON;                     // to mimic the behaviour of an electricity 
+	digitalWrite(outputForLED, LED_state);  // meter which starts up in 'sleep' mode
+	  
+	delay(delayBeforeSerialStarts * 1000); // allow time to open Serial monitor      
 	 
-      sampleV = adc1_get_raw(ADC1_CHANNEL_0);                    // store the ADC value (this one is for Voltage)
-      adc_power_on();
-	//ADMUX = 0x40 + currentSensor_diverted;  // set up the next conversion, which is for Diverted Current
-      //ADCSRA |= (1<<ADSC);              // start the ADC
-      sample_index++;                   // increment the control flag
-      sampleI_diverted = sampleI_diverted_raw;
-      sampleI_grid = sampleI_grid_raw;
-      dataReady = true;                 // all three ADC values can now be processed
-      break;
-    case 1:
-      sampleI_diverted_raw = adc1_get_raw(ADC1_CHANNEL_3);               // store the ADC value (this one is for Diverted Current)
-	adc_power_on();      
-	//ADMUX = 0x40 + currentSensor_grid;  // set up the next conversion, which is for Grid Current
-      //ADCSRA |= (1<<ADSC);              // start the ADC
-      sample_index++;                   // increment the control flag
-      break;
-    case 2:
-      sampleI_grid_raw = adc1_get_raw(ADC1_CHANNEL_6);               // store the ADC value (this one is for Grid Current)
-      adc_power_on();
-	//ADMUX = 0x40 + voltageSensor;  // set up the next conversion, which is for Voltage
-      //ADCSRA |= (1<<ADSC);              // start the ADC
-      sample_index = 0;                 // reset the control flag
-      break;
-    default:
-      sample_index = 0;                 // to prevent lockup (should never get here)      
-  }
+	Serial.begin(9600);
+	Serial.println();
+	Serial.println("-------------------------------------");
+	Serial.println("Sketch ID:      cal_CT1_v_meter.ino");
+	Serial.println();
+
+              
+	// When using integer maths, the SIZE of the ENERGY BUCKET is altered to match the
+	// scaling of the energy detection mechanism that is in use.  This avoids the need 
+	// to re-scale every energy contribution, thus saving processing time.  This process 
+	// is described in more detail in the function, allGeneralProcessing(), just before 
+	// the energy bucket is updated at the start of each new cycle of the mains.
+	//
+	// For the flow of energy at the 'grid' connection point (CT1) 
+	capacityOfEnergyBucket_long = 
+	     (long)ENERGY_BUCKET_CAPACITY_IN_JOULES * CYCLES_PER_SECOND * (1/powerCal_grid);
+	energyInBucket_long = 0;
+	  
+	// When using integer maths, calibration values that have supplied in floating point 
+	// form need to be rescaled.  
+	//
+	phaseCal_grid_int = phaseCal_grid * 256; // for integer maths
+	phaseCal_diverted_int = phaseCal_diverted * 256; // for integer maths
+	 
+	// Define operating limits for the LP filter which identifies DC offset in the voltage 
+	// sample stream.  By limiting the output range, the filter always should start up 
+	// correctly.
+	DCoffset_V_long = 512L * 256; // nominal mid-point value of ADC @ x256 scale  
+	DCoffset_V_min = (long)(512L - 100) * 256; // mid-point of ADC minus a working margin
+	DCoffset_V_max = (long)(512L + 100) * 256; // mid-point of ADC plus a working margin
+	
+	Serial.print ("ADC mode:       ");
+	Serial.print (ADC_TIMER_PERIOD);
+	Serial.println ( " uS fixed timer");
+
+ 	// Set up the ADC to be triggered by a hardware timer of fixed duration  
+	esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_10Bit, 0, &adc1_chars);
+	adc_set_clk_div(adc_clk_div);					//ADC clock divider, ADC clock is divided from APB clock (esp32 clk 80 MHz
+	adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_11db)
+	adc1_config_channel_atten(ADC1_CHANNEL_3, ADC_ATTEN_11db)
+	adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_11db)
+    	ESP_ERROR_CHECK(adc1_config_width(ADC_WIDTH_10Bit));
+    	ESP_ERROR_CHECK(adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_11));
+	adc_power_on();		          //Enable ADC power.
+
+	//Original code
+	//ADCSRA  = (1<<ADPS0)+(1<<ADPS1)+(1<<ADPS2);  		// Set the ADC's clock to system clock / 128
+	//ADCSRA |= (1 << ADEN);                 		// Enable ADC
+
+	Timer1.initialize(ADC_TIMER_PERIOD);   // set Timer1 interval
+	Timer1.attachInterrupt( timerIsr );    // declare timerIsr() as interrupt service routine
+	
+	Serial.print ( "powerCal_grid =      "); Serial.println (powerCal_grid,4);
+	Serial.print ( "powerCal_diverted = "); Serial.println (powerCal_diverted,4);
+	  
+	Serial.print ("zero-crossing persistence (sample sets) = ");
+	Serial.println (PERSISTENCE_FOR_POLARITY_CHANGE);
+	Serial.print ("continuity sampling display rate (mains cycles) = ");
+	Serial.println (CONTINUITY_CHECK_MAXCOUNT);  
+  
+  	Serial.println ("----");    
+
+	}
+	// An Interrupt Service Routine is now defined in which the ADC is instructed to 
+	// measure each analogue input in sequence.  A "data ready"flag is set after each 
+	// voltage conversion has been completed.  
+	//   For each set of samples, the two samples for current  are taken before the one 
+	// for voltage.  This is appropriate because each waveform current is generally slightly 
+	// advanced relative to the waveform for voltage.  The data ready flag is cleared 
+	// within loop().
+	//   This Interrupt Service Routine is for use when the ADC is fixed timer mode.  It is 
+	// executed whenever the ADC timer expires.  In this mode, the next ADC conversion is 
+	// initiated from within this ISR.  
+	//
+void timerIsr(void){                                         
+	static unsigned char sample_index = 0;
+	static int  sampleI_grid_raw;
+	static int sampleI_diverted_raw;
+
+	switch(sample_index){
+		case 0:		
+			sampleV = adc1_get_raw(ADC1_CHANNEL_0);                    // store the ADC value (this one is for Voltage)
+			adc_power_on();
+			//ADMUX = 0x40 + currentSensor_diverted;  // set up the next conversion, which is for Diverted Current
+			//ADCSRA |= (1<<ADSC);              // start the ADC
+			sample_index++;                   // increment the control flag
+			sampleI_diverted = sampleI_diverted_raw;
+			sampleI_grid = sampleI_grid_raw;
+			dataReady = true;                 // all three ADC values can now be processed
+		break;
+		case 1:
+			sampleI_diverted_raw = adc1_get_raw(ADC1_CHANNEL_3);               // store the ADC value (this one is for Diverted Current)
+			adc_power_on();      
+			//ADMUX = 0x40 + currentSensor_grid;  // set up the next conversion, which is for Grid Current
+			//ADCSRA |= (1<<ADSC);              // start the ADC
+			sample_index++;                   // increment the control flag
+		break;
+		case 2:
+			sampleI_grid_raw = adc1_get_raw(ADC1_CHANNEL_6);               // store the ADC value (this one is for Grid Current)
+			adc_power_on();
+			//ADMUX = 0x40 + voltageSensor;  // set up the next conversion, which is for Voltage
+			//ADCSRA |= (1<<ADSC);              // start the ADC
+			sample_index = 0;                 // reset the control flag
+		break;
+		default:
+		sample_index = 0;                 // to prevent lockup (should never get here)      
+	}
 }
 
 
